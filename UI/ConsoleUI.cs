@@ -75,247 +75,291 @@ public class ConsoleUI
 
     private async Task ExploreByResourceGroupAsync()
     {
-        await AnsiConsole.Status()
+        var result = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Star)
             .StartAsync("Carregando Resource Groups...", async ctx =>
             {
-                var resourceGroups = await _resourceService.GetResourceGroupsAsync();
-                
-                if (!resourceGroups.Any())
-                {
-                    AnsiConsole.MarkupLine("[yellow]Nenhum Resource Group encontrado[/]");
-                    return;
-                }
-
-                var table = new Table();
-                table.AddColumn("Nome");
-                table.AddColumn("Localização");
-                
-                foreach (var rg in resourceGroups)
-                {
-                    table.AddRow(rg.Name, rg.Location);
-                }
-                
-                AnsiConsole.Write(table);
-
-                var selectedRg = AnsiConsole.Prompt(
-                    new SelectionPrompt<string>()
-                        .Title("Selecione um Resource Group:")
-                        .AddChoices(resourceGroups.Select(rg => rg.Name).Append("Voltar")));
-
-                if (selectedRg != "Voltar")
-                {
-                    await ExploreResourceGroupAsync(selectedRg);
-                }
+                return await _resourceService.GetResourceGroupsAsync();
             });
+
+        // Exibir logs após a operação
+        foreach (var log in result.Logs)
+        {
+            AnsiConsole.MarkupLine($"[dim]{log}[/]");
+        }
+
+        if (!result.Success || result.Data == null || !result.Data.Any())
+        {
+            if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                AnsiConsole.MarkupLine($"[red]{result.ErrorMessage}[/]");
+            }
+            else
+            {
+                AnsiConsole.MarkupLine("[yellow]Nenhum Resource Group encontrado[/]");
+            }
+            return;
+        }
+
+        var resourceGroups = result.Data;
+        
+        var table = new Table();
+        table.AddColumn("Nome");
+        table.AddColumn("Localização");
+        
+        foreach (var rg in resourceGroups)
+        {
+            table.AddRow(rg.Name, rg.Location);
+        }
+        
+        AnsiConsole.Write(table);
+
+        var selectedRg = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Selecione um Resource Group:")
+                .AddChoices(resourceGroups.Select(rg => rg.Name).Append("Voltar")));
+
+        if (selectedRg != "Voltar")
+        {
+            await ExploreResourceGroupAsync(selectedRg);
+        }
     }
 
     private async Task ExploreResourceGroupAsync(string resourceGroupName)
     {
-        await AnsiConsole.Status()
+        var accounts = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Star)
             .StartAsync($"Carregando contas CosmosDB em {resourceGroupName}...", async ctx =>
             {
-                var accounts = await _resourceService.GetCosmosAccountsAsync(resourceGroupName);
-                
-                if (!accounts.Any())
-                {
-                    AnsiConsole.MarkupLine("[yellow]Nenhuma conta CosmosDB encontrada neste Resource Group[/]");
-                    return;
-                }
-
-                var table = new Table();
-                table.AddColumn("Nome");
-                table.AddColumn("Localização");
-                table.AddColumn("Endpoint");
-                
-                foreach (var account in accounts)
-                {
-                    table.AddRow(account.Name, account.Location, account.DocumentEndpoint);
-                }
-                
-                AnsiConsole.Write(table);
-
-                var selectedAccount = AnsiConsole.Prompt(
-                    new SelectionPrompt<string>()
-                        .Title("Selecione uma conta CosmosDB:")
-                        .AddChoices(accounts.Select(a => a.Name).Append("Voltar")));
-
-                if (selectedAccount != "Voltar")
-                {
-                    var account = accounts.First(a => a.Name == selectedAccount);
-                    _dataService.Initialize(account.DocumentEndpoint, account.PrimaryMasterKey);
-                    await ExploreDatabasesAsync();
-                }
+                return await _resourceService.GetCosmosAccountsAsync(resourceGroupName);
             });
+        
+        if (!accounts.Any())
+        {
+            AnsiConsole.MarkupLine("[yellow]Nenhuma conta CosmosDB encontrada neste Resource Group[/]");
+            return;
+        }
+
+        var table = new Table();
+        table.AddColumn("Nome");
+        table.AddColumn("Localização");
+        table.AddColumn("Endpoint");
+        
+        foreach (var account in accounts)
+        {
+            table.AddRow(account.Name, account.Location, account.DocumentEndpoint);
+        }
+        
+        AnsiConsole.Write(table);
+
+        var selectedAccount = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Selecione uma conta CosmosDB:")
+                .AddChoices(accounts.Select(a => a.Name).Append("Voltar")));
+
+        if (selectedAccount != "Voltar")
+        {
+            var account = accounts.First(a => a.Name == selectedAccount);
+            
+            AnsiConsole.MarkupLine($"[dim]Conectando ao endpoint: {account.DocumentEndpoint}[/]");
+            
+            if (_dataService.Initialize(account.DocumentEndpoint, account.PrimaryMasterKey))
+            {
+                AnsiConsole.MarkupLine("[green]Conexão estabelecida com sucesso![/]");
+                await ExploreDatabasesAsync();
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]{_dataService.LastError}[/]");
+            }
+        }
     }
 
     private async Task ListAllCosmosAccountsAsync()
     {
-        await AnsiConsole.Status()
+        var accounts = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Star)
             .StartAsync("Carregando todas as contas CosmosDB...", async ctx =>
             {
-                var accounts = await _resourceService.GetAllCosmosAccountsAsync();
-                
-                if (!accounts.Any())
-                {
-                    AnsiConsole.MarkupLine("[yellow]Nenhuma conta CosmosDB encontrada[/]");
-                    return;
-                }
-
-                var table = new Table();
-                table.AddColumn("Nome");
-                table.AddColumn("Resource Group");
-                table.AddColumn("Localização");
-                table.AddColumn("Endpoint");
-                
-                foreach (var account in accounts)
-                {
-                    table.AddRow(account.Name, account.ResourceGroup, account.Location, account.DocumentEndpoint);
-                }
-                
-                AnsiConsole.Write(table);
-
-                var selectedAccount = AnsiConsole.Prompt(
-                    new SelectionPrompt<string>()
-                        .Title("Selecione uma conta CosmosDB:")
-                        .AddChoices(accounts.Select(a => a.Name).Append("Voltar")));
-
-                if (selectedAccount != "Voltar")
-                {
-                    var account = accounts.First(a => a.Name == selectedAccount);
-                    _dataService.Initialize(account.DocumentEndpoint, account.PrimaryMasterKey);
-                    await ExploreDatabasesAsync();
-                }
+                return await _resourceService.GetAllCosmosAccountsAsync();
             });
+        
+        if (!accounts.Any())
+        {
+            AnsiConsole.MarkupLine("[yellow]Nenhuma conta CosmosDB encontrada[/]");
+            return;
+        }
+
+        var table = new Table();
+        table.AddColumn("Nome");
+        table.AddColumn("Resource Group");
+        table.AddColumn("Localização");
+        table.AddColumn("Endpoint");
+        
+        foreach (var account in accounts)
+        {
+            table.AddRow(account.Name, account.ResourceGroup, account.Location, account.DocumentEndpoint);
+        }
+        
+        AnsiConsole.Write(table);
+
+        var selectedAccount = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Selecione uma conta CosmosDB:")
+                .AddChoices(accounts.Select(a => a.Name).Append("Voltar")));
+
+        if (selectedAccount != "Voltar")
+        {
+            var account = accounts.First(a => a.Name == selectedAccount);
+            
+            AnsiConsole.MarkupLine($"[dim]Conectando ao endpoint: {account.DocumentEndpoint}[/]");
+            
+            if (_dataService.Initialize(account.DocumentEndpoint, account.PrimaryMasterKey))
+            {
+                AnsiConsole.MarkupLine("[green]Conexão estabelecida com sucesso![/]");
+                await ExploreDatabasesAsync();
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[red]{_dataService.LastError}[/]");
+            }
+        }
     }
 
     private async Task ConnectDirectlyAsync()
     {
+        AnsiConsole.MarkupLine("[cyan]Conexão direta ao CosmosDB[/]");
+        AnsiConsole.MarkupLine("[dim]Exemplo de endpoint: https://sua-conta.documents.azure.com:443/[/]");
+        
         var endpoint = AnsiConsole.Ask<string>("Digite o [cyan]endpoint[/] do CosmosDB:");
         var key = AnsiConsole.Prompt(
             new TextPrompt<string>("Digite a [cyan]chave primária[/]:")
                 .PromptStyle("red")
                 .Secret());
 
-        try
+        AnsiConsole.MarkupLine($"[dim]Conectando ao endpoint: {endpoint}[/]");
+        
+        if (_dataService.Initialize(endpoint, key))
         {
-            _dataService.Initialize(endpoint, key);
+            AnsiConsole.MarkupLine("[green]Conexão estabelecida com sucesso![/]");
             await ExploreDatabasesAsync();
         }
-        catch (Exception ex)
+        else
         {
-            AnsiConsole.MarkupLine($"[red]Erro ao conectar: {ex.Message}[/]");
+            AnsiConsole.MarkupLine($"[red]{_dataService.LastError}[/]");
+            AnsiConsole.MarkupLine("[yellow]Dicas:[/]");
+            AnsiConsole.MarkupLine("[yellow]1. Verifique se o endpoint está correto (ex: https://conta.documents.azure.com:443/)[/]");
+            AnsiConsole.MarkupLine("[yellow]2. Verifique se a chave primária está correta[/]");
+            AnsiConsole.MarkupLine("[yellow]3. Verifique se o firewall do CosmosDB permite seu IP[/]");
         }
     }
 
     private async Task ExploreDatabasesAsync()
     {
-        await AnsiConsole.Status()
+        var databases = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Star)
             .StartAsync("Carregando databases...", async ctx =>
             {
-                var databases = await _dataService.GetDatabasesAsync();
-                
-                if (!databases.Any())
-                {
-                    AnsiConsole.MarkupLine("[yellow]Nenhum database encontrado[/]");
-                    return;
-                }
-
-                while (true)
-                {
-                    var table = new Table();
-                    table.AddColumn("Database ID");
-                    
-                    foreach (var db in databases)
-                    {
-                        table.AddRow(db.Id);
-                    }
-                    
-                    AnsiConsole.Write(table);
-
-                    var choices = databases.Select(d => d.Id).ToList();
-                    choices.Add("Gerar exemplo cURL (listar databases)");
-                    choices.Add("Voltar");
-
-                    var selectedDb = AnsiConsole.Prompt(
-                        new SelectionPrompt<string>()
-                            .Title("Selecione um database:")
-                            .AddChoices(choices));
-
-                    if (selectedDb == "Voltar")
-                    {
-                        break;
-                    }
-                    else if (selectedDb == "Gerar exemplo cURL (listar databases)")
-                    {
-                        ShowCurlExample(_curlGenerator.GenerateListDatabasesCurl(
-                            _dataService.GetCurrentEndpoint(), 
-                            _dataService.GetCurrentKey()));
-                    }
-                    else
-                    {
-                        await ExploreCollectionsAsync(selectedDb);
-                    }
-                }
+                return await _dataService.GetDatabasesAsync();
             });
+        
+        if (!databases.Any())
+        {
+            AnsiConsole.MarkupLine("[yellow]Nenhum database encontrado[/]");
+            return;
+        }
+
+        while (true)
+        {
+            var table = new Table();
+            table.AddColumn("Database ID");
+            
+            foreach (var db in databases)
+            {
+                table.AddRow(db.Id);
+            }
+            
+            AnsiConsole.Write(table);
+
+            var choices = databases.Select(d => d.Id).ToList();
+            choices.Add("Gerar exemplo cURL (listar databases)");
+            choices.Add("Voltar");
+
+            var selectedDb = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Selecione um database:")
+                    .AddChoices(choices));
+
+            if (selectedDb == "Voltar")
+            {
+                break;
+            }
+            else if (selectedDb == "Gerar exemplo cURL (listar databases)")
+            {
+                ShowCurlExample(_curlGenerator.GenerateListDatabasesCurl(
+                    _dataService.GetCurrentEndpoint(), 
+                    _dataService.GetCurrentKey()));
+            }
+            else
+            {
+                await ExploreCollectionsAsync(selectedDb);
+            }
+        }
     }
 
     private async Task ExploreCollectionsAsync(string databaseId)
     {
-        await AnsiConsole.Status()
+        var collections = await AnsiConsole.Status()
             .Spinner(Spinner.Known.Star)
             .StartAsync($"Carregando collections de {databaseId}...", async ctx =>
             {
-                var collections = await _dataService.GetCollectionsAsync(databaseId);
-                
-                if (!collections.Any())
-                {
-                    AnsiConsole.MarkupLine("[yellow]Nenhuma collection encontrada[/]");
-                    return;
-                }
-
-                while (true)
-                {
-                    var table = new Table();
-                    table.AddColumn("Collection ID");
-                    table.AddColumn("Partition Key");
-                    
-                    foreach (var coll in collections)
-                    {
-                        table.AddRow(coll.Id, coll.PartitionKey);
-                    }
-                    
-                    AnsiConsole.Write(table);
-
-                    var choices = collections.Select(c => c.Id).ToList();
-                    choices.Add("Gerar exemplo cURL (listar collections)");
-                    choices.Add("Voltar");
-
-                    var selectedColl = AnsiConsole.Prompt(
-                        new SelectionPrompt<string>()
-                            .Title("Selecione uma collection:")
-                            .AddChoices(choices));
-
-                    if (selectedColl == "Voltar")
-                    {
-                        break;
-                    }
-                    else if (selectedColl == "Gerar exemplo cURL (listar collections)")
-                    {
-                        ShowCurlExample(_curlGenerator.GenerateListCollectionsCurl(
-                            _dataService.GetCurrentEndpoint(),
-                            databaseId,
-                            _dataService.GetCurrentKey()));
-                    }
-                    else
-                    {
-                        await ExploreDocumentsAsync(databaseId, selectedColl);
-                    }
-                }
+                return await _dataService.GetCollectionsAsync(databaseId);
             });
+        
+        if (!collections.Any())
+        {
+            AnsiConsole.MarkupLine("[yellow]Nenhuma collection encontrada[/]");
+            return;
+        }
+
+        while (true)
+        {
+            var table = new Table();
+            table.AddColumn("Collection ID");
+            table.AddColumn("Partition Key");
+            
+            foreach (var coll in collections)
+            {
+                table.AddRow(coll.Id, coll.PartitionKey);
+            }
+            
+            AnsiConsole.Write(table);
+
+            var choices = collections.Select(c => c.Id).ToList();
+            choices.Add("Gerar exemplo cURL (listar collections)");
+            choices.Add("Voltar");
+
+            var selectedColl = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Selecione uma collection:")
+                    .AddChoices(choices));
+
+            if (selectedColl == "Voltar")
+            {
+                break;
+            }
+            else if (selectedColl == "Gerar exemplo cURL (listar collections)")
+            {
+                ShowCurlExample(_curlGenerator.GenerateListCollectionsCurl(
+                    _dataService.GetCurrentEndpoint(),
+                    databaseId,
+                    _dataService.GetCurrentKey()));
+            }
+            else
+            {
+                await ExploreDocumentsAsync(databaseId, selectedColl);
+            }
+        }
     }
 
     private async Task ExploreDocumentsAsync(string databaseId, string collectionId)

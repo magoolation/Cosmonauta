@@ -10,23 +10,78 @@ public class CosmosDataService : IDisposable
     private CosmosClient? _cosmosClient;
     private string _currentEndpoint = string.Empty;
     private string _currentKey = string.Empty;
+    public string LastError { get; private set; } = string.Empty;
 
-    public void Initialize(string endpoint, string key)
+    public bool Initialize(string endpoint, string key)
     {
-        _currentEndpoint = endpoint;
-        _currentKey = key;
-        
-        var clientOptions = new CosmosClientOptions
+        try
         {
-            ConnectionMode = ConnectionMode.Gateway,
-            SerializerOptions = new CosmosSerializationOptions
+            // Validar e formatar endpoint
+            if (string.IsNullOrWhiteSpace(endpoint))
             {
-                PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase
+                LastError = "Endpoint não pode estar vazio";
+                return false;
             }
-        };
 
-        _cosmosClient?.Dispose();
-        _cosmosClient = new CosmosClient(endpoint, key, clientOptions);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                LastError = "Chave não pode estar vazia";
+                return false;
+            }
+
+            // Garantir que o endpoint tem https://
+            if (!endpoint.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && 
+                !endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                endpoint = $"https://{endpoint}";
+            }
+
+            // Adicionar porta padrão se necessário
+            if (!endpoint.Contains(":443") && !endpoint.EndsWith(".documents.azure.com") && 
+                !endpoint.EndsWith(".documents.azure.com/"))
+            {
+                if (endpoint.Contains(".documents.azure.com"))
+                {
+                    endpoint = endpoint.Replace(".documents.azure.com", ".documents.azure.com:443");
+                }
+                else if (!endpoint.Contains(":"))
+                {
+                    endpoint = $"{endpoint}:443";
+                }
+            }
+
+            _currentEndpoint = endpoint;
+            _currentKey = key;
+            
+            var clientOptions = new CosmosClientOptions
+            {
+                ConnectionMode = ConnectionMode.Gateway,
+                RequestTimeout = TimeSpan.FromSeconds(30),
+                MaxRetryAttemptsOnRateLimitedRequests = 9,
+                MaxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds(30),
+                SerializerOptions = new CosmosSerializationOptions
+                {
+                    PropertyNamingPolicy = CosmosPropertyNamingPolicy.Default,
+                    IgnoreNullValues = true,
+                    Indented = true
+                }
+            };
+
+            _cosmosClient?.Dispose();
+            _cosmosClient = new CosmosClient(endpoint, key, clientOptions);
+            
+            // Testar a conexão
+            var testTask = _cosmosClient.ReadAccountAsync();
+            testTask.Wait(TimeSpan.FromSeconds(10));
+            
+            LastError = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LastError = $"Erro ao conectar: {ex.Message}";
+            return false;
+        }
     }
 
     public async Task<List<DatabaseInfo>> GetDatabasesAsync()
