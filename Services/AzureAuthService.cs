@@ -13,15 +13,22 @@ public class AzureAuthService
 
     public AzureAuthService()
     {
+        // Configurar para priorizar Azure CLI
         var credentialOptions = new DefaultAzureCredentialOptions
         {
-            ExcludeEnvironmentCredential = false,
-            ExcludeManagedIdentityCredential = false,
-            ExcludeVisualStudioCredential = false,
-            ExcludeVisualStudioCodeCredential = false,
+            // Desabilitar métodos que vêm antes do Azure CLI
+            ExcludeEnvironmentCredential = true,
+            ExcludeManagedIdentityCredential = true,
+            ExcludeWorkloadIdentityCredential = true,
+            
+            // Manter Azure CLI habilitado (é o primeiro agora)
             ExcludeAzureCliCredential = false,
+            
+            // Outros métodos como fallback
             ExcludeAzurePowerShellCredential = false,
             ExcludeAzureDeveloperCliCredential = false,
+            ExcludeVisualStudioCredential = false,
+            ExcludeVisualStudioCodeCredential = false,
             ExcludeInteractiveBrowserCredential = true
         };
         

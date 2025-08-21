@@ -90,8 +90,7 @@ public class ConsoleUI
                 }
                 catch (Exception ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Erro ao listar subscriptions: {ex.Message}[/]");
-                    AnsiConsole.MarkupLine("[yellow]Certifique-se de estar logado no Azure CLI (az login)[/]");
+                    ctx.Status($"[red]Erro: {ex.Message}[/]");
                     return new List<Azure.ResourceManager.Resources.SubscriptionResource>();
                 }
             });
@@ -103,6 +102,87 @@ public class ConsoleUI
             return;
         }
 
+        AnsiConsole.MarkupLine($"[green]Encontradas {subscriptions.Count} subscription(s)[/]");
+        AnsiConsole.WriteLine();
+
+        // Opções de seleção
+        var selectionMethod = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[cyan]Como deseja selecionar a subscription?[/]")
+                .AddChoices(new[]
+                {
+                    "Buscar por nome/ID",
+                    "Listar todas",
+                    "Digitar ID exato",
+                    "Cancelar"
+                }));
+
+        if (selectionMethod == "Cancelar")
+            return;
+
+        Azure.ResourceManager.Resources.SubscriptionResource? selectedSub = null;
+
+        switch (selectionMethod)
+        {
+            case "Buscar por nome/ID":
+                selectedSub = await SearchSubscriptionAsync(subscriptions);
+                break;
+            
+            case "Listar todas":
+                selectedSub = await ListAllSubscriptionsAsync(subscriptions);
+                break;
+            
+            case "Digitar ID exato":
+                selectedSub = await EnterSubscriptionIdAsync(subscriptions);
+                break;
+        }
+
+        if (selectedSub != null)
+        {
+            _authService.SetCurrentSubscription(selectedSub);
+            
+            AnsiConsole.Clear();
+            AnsiConsole.Write(new FigletText("Cosmonauta")
+                .LeftJustified()
+                .Color(Color.Blue));
+            AnsiConsole.MarkupLine("[bold cyan]Azure CosmosDB Explorer[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[green]Subscription selecionada:[/] [yellow]{selectedSub.Data.DisplayName}[/]");
+            AnsiConsole.WriteLine();
+        }
+    }
+
+    private async Task<Azure.ResourceManager.Resources.SubscriptionResource?> SearchSubscriptionAsync(
+        List<Azure.ResourceManager.Resources.SubscriptionResource> subscriptions)
+    {
+        var searchTerm = AnsiConsole.Ask<string>("Digite parte do [cyan]nome[/] ou [cyan]ID[/] da subscription:");
+        
+        var filtered = subscriptions.Where(s => 
+            (s.Data.DisplayName?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            s.Data.SubscriptionId.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)
+        ).ToList();
+
+        if (!filtered.Any())
+        {
+            AnsiConsole.MarkupLine($"[yellow]Nenhuma subscription encontrada com o termo '{searchTerm}'[/]");
+            return null;
+        }
+
+        if (filtered.Count == 1)
+        {
+            var sub = filtered.First();
+            if (AnsiConsole.Confirm($"Selecionar [cyan]{sub.Data.DisplayName}[/] ({sub.Data.SubscriptionId})?"))
+                return sub;
+            return null;
+        }
+
+        // Se houver múltiplos resultados, mostrar lista filtrada
+        return await ListAllSubscriptionsAsync(filtered);
+    }
+
+    private Task<Azure.ResourceManager.Resources.SubscriptionResource?> ListAllSubscriptionsAsync(
+        List<Azure.ResourceManager.Resources.SubscriptionResource> subscriptions)
+    {
         var table = new Table();
         table.AddColumn("Nome");
         table.AddColumn("ID");
@@ -119,6 +199,13 @@ public class ConsoleUI
 
         AnsiConsole.Write(table);
 
+        // Para listas grandes, usar paginação
+        var pageSize = 20;
+        if (subscriptions.Count > pageSize)
+        {
+            AnsiConsole.MarkupLine($"[dim]Mostrando seleção com busca interativa (use as setas e digite para filtrar)[/]");
+        }
+
         var subscriptionChoices = subscriptions
             .Select(s => $"{s.Data.DisplayName} ({s.Data.SubscriptionId})")
             .Append("Cancelar")
@@ -127,24 +214,40 @@ public class ConsoleUI
         var selected = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("[cyan]Selecione uma subscription:[/]")
+                .PageSize(Math.Min(pageSize, subscriptionChoices.Count))
+                .EnableSearch() // Habilita busca interativa
+                .SearchPlaceholderText("Digite para filtrar...")
                 .AddChoices(subscriptionChoices));
 
         if (selected != "Cancelar")
         {
-            var selectedSub = subscriptions.First(s => 
-                $"{s.Data.DisplayName} ({s.Data.SubscriptionId})" == selected);
-            
-            _authService.SetCurrentSubscription(selectedSub);
-            
-            AnsiConsole.Clear();
-            AnsiConsole.Write(new FigletText("Cosmonauta")
-                .LeftJustified()
-                .Color(Color.Blue));
-            AnsiConsole.MarkupLine("[bold cyan]Azure CosmosDB Explorer[/]");
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"[green]Subscription selecionada:[/] [yellow]{selectedSub.Data.DisplayName}[/]");
-            AnsiConsole.WriteLine();
+            return Task.FromResult<Azure.ResourceManager.Resources.SubscriptionResource?>(
+                subscriptions.First(s => 
+                    $"{s.Data.DisplayName} ({s.Data.SubscriptionId})" == selected));
         }
+
+        return Task.FromResult<Azure.ResourceManager.Resources.SubscriptionResource?>(null);
+    }
+
+    private Task<Azure.ResourceManager.Resources.SubscriptionResource?> EnterSubscriptionIdAsync(
+        List<Azure.ResourceManager.Resources.SubscriptionResource> subscriptions)
+    {
+        var subscriptionId = AnsiConsole.Ask<string>("Digite o [cyan]ID completo[/] da subscription:");
+        
+        var sub = subscriptions.FirstOrDefault(s => 
+            s.Data.SubscriptionId.Equals(subscriptionId, StringComparison.OrdinalIgnoreCase));
+        
+        if (sub == null)
+        {
+            AnsiConsole.MarkupLine($"[red]Subscription com ID '{subscriptionId}' não encontrada[/]");
+            return Task.FromResult<Azure.ResourceManager.Resources.SubscriptionResource?>(null);
+        }
+
+        AnsiConsole.MarkupLine($"[green]Encontrada:[/] {sub.Data.DisplayName} ({sub.Data.SubscriptionId})");
+        if (AnsiConsole.Confirm("Confirma seleção?"))
+            return Task.FromResult<Azure.ResourceManager.Resources.SubscriptionResource?>(sub);
+        
+        return Task.FromResult<Azure.ResourceManager.Resources.SubscriptionResource?>(null);
     }
 
     private async Task ExploreByResourceGroupAsync()
