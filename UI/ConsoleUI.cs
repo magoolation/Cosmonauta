@@ -30,34 +30,39 @@ public class ConsoleUI
         AnsiConsole.MarkupLine("[bold cyan]Azure CosmosDB Explorer[/]");
         AnsiConsole.WriteLine();
 
-        try
+        // Tentar obter subscription atual
+        var currentSubscription = await _authService.GetCurrentSubscriptionNameAsync();
+        if (!string.IsNullOrEmpty(currentSubscription))
         {
-            var subscriptionName = await _authService.GetCurrentSubscriptionNameAsync();
-            AnsiConsole.MarkupLine($"[green]Conectado à subscription:[/] [yellow]{subscriptionName}[/]");
-            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[green]Subscription atual:[/] [yellow]{currentSubscription}[/]");
         }
-        catch (Exception ex)
+        else
         {
-            AnsiConsole.MarkupLine($"[red]Erro ao conectar ao Azure: {ex.Message}[/]");
-            AnsiConsole.MarkupLine("[yellow]Certifique-se de estar logado no Azure CLI (az login)[/]");
-            return;
+            AnsiConsole.MarkupLine("[yellow]Nenhuma subscription selecionada[/]");
         }
+        AnsiConsole.WriteLine();
 
         while (true)
         {
+            var menuChoices = new List<string>
+            {
+                "Selecionar/Alterar Subscription",
+                "Explorar por Resource Group",
+                "Listar todas as Contas CosmosDB",
+                "Conectar diretamente (endpoint + key)",
+                "Sair"
+            };
+
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
                     .Title("[cyan]Menu Principal[/]")
-                    .AddChoices(new[]
-                    {
-                        "Explorar por Resource Group",
-                        "Listar todas as Contas CosmosDB",
-                        "Conectar diretamente (endpoint + key)",
-                        "Sair"
-                    }));
+                    .AddChoices(menuChoices));
 
             switch (choice)
             {
+                case "Selecionar/Alterar Subscription":
+                    await SelectSubscriptionAsync();
+                    break;
                 case "Explorar por Resource Group":
                     await ExploreByResourceGroupAsync();
                     break;
@@ -70,6 +75,75 @@ public class ConsoleUI
                 case "Sair":
                     return;
             }
+        }
+    }
+
+    private async Task SelectSubscriptionAsync()
+    {
+        var subscriptions = await AnsiConsole.Status()
+            .Spinner(Spinner.Known.Star)
+            .StartAsync("Carregando subscriptions disponíveis...", async ctx =>
+            {
+                try
+                {
+                    return await _authService.GetAllSubscriptionsAsync();
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[red]Erro ao listar subscriptions: {ex.Message}[/]");
+                    AnsiConsole.MarkupLine("[yellow]Certifique-se de estar logado no Azure CLI (az login)[/]");
+                    return new List<Azure.ResourceManager.Resources.SubscriptionResource>();
+                }
+            });
+
+        if (!subscriptions.Any())
+        {
+            AnsiConsole.MarkupLine("[red]Nenhuma subscription encontrada.[/]");
+            AnsiConsole.MarkupLine("[yellow]Certifique-se de estar logado no Azure CLI (az login)[/]");
+            return;
+        }
+
+        var table = new Table();
+        table.AddColumn("Nome");
+        table.AddColumn("ID");
+        table.AddColumn("Estado");
+
+        foreach (var sub in subscriptions)
+        {
+            table.AddRow(
+                sub.Data.DisplayName ?? "Sem nome",
+                sub.Data.SubscriptionId,
+                sub.Data.State?.ToString() ?? "Desconhecido"
+            );
+        }
+
+        AnsiConsole.Write(table);
+
+        var subscriptionChoices = subscriptions
+            .Select(s => $"{s.Data.DisplayName} ({s.Data.SubscriptionId})")
+            .Append("Cancelar")
+            .ToList();
+
+        var selected = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("[cyan]Selecione uma subscription:[/]")
+                .AddChoices(subscriptionChoices));
+
+        if (selected != "Cancelar")
+        {
+            var selectedSub = subscriptions.First(s => 
+                $"{s.Data.DisplayName} ({s.Data.SubscriptionId})" == selected);
+            
+            _authService.SetCurrentSubscription(selectedSub);
+            
+            AnsiConsole.Clear();
+            AnsiConsole.Write(new FigletText("Cosmonauta")
+                .LeftJustified()
+                .Color(Color.Blue));
+            AnsiConsole.MarkupLine("[bold cyan]Azure CosmosDB Explorer[/]");
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine($"[green]Subscription selecionada:[/] [yellow]{selectedSub.Data.DisplayName}[/]");
+            AnsiConsole.WriteLine();
         }
     }
 

@@ -25,6 +25,13 @@ public class AzureResourceService
         {
             var subscription = await _authService.GetCurrentSubscriptionAsync();
             
+            if (subscription == null)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Nenhuma subscription selecionada. Por favor, selecione uma subscription primeiro.";
+                return result;
+            }
+            
             result.AddLog($"Listando Resource Groups da subscription: {subscription.Data.DisplayName}");
             
             await foreach (var resourceGroup in subscription.GetResourceGroups())
@@ -61,6 +68,8 @@ public class AzureResourceService
         try
         {
             var subscription = await _authService.GetCurrentSubscriptionAsync();
+            if (subscription == null) return cosmosAccounts;
+            
             var resourceGroup = await subscription.GetResourceGroupAsync(resourceGroupName);
 
             if (!resourceGroup.HasValue)
@@ -105,6 +114,7 @@ public class AzureResourceService
         try
         {
             var subscription = await _authService.GetCurrentSubscriptionAsync();
+            if (subscription == null) return cosmosAccounts;
 
             await foreach (var account in subscription.GetCosmosDBAccountsAsync())
             {

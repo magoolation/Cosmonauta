@@ -33,7 +33,7 @@ public class AzureAuthService
     
     public ArmClient GetArmClient() => _armClient;
 
-    public async Task<SubscriptionResource> GetCurrentSubscriptionAsync()
+    public async Task<SubscriptionResource?> GetCurrentSubscriptionAsync()
     {
         if (_currentSubscription == null)
         {
@@ -43,31 +43,29 @@ public class AzureAuthService
             }
             catch
             {
-                var subscriptions = _armClient.GetSubscriptions();
-                await foreach (var sub in subscriptions)
-                {
-                    _currentSubscription = sub;
-                    break;
-                }
-                
-                if (_currentSubscription == null)
-                    throw new InvalidOperationException("Nenhuma subscription Azure encontrada. Verifique se está logado no Azure CLI (az login)");
+                // Se não houver subscription padrão, retorna null
+                return null;
             }
         }
         
         return _currentSubscription;
     }
-
-    public async Task<string> GetCurrentSubscriptionIdAsync()
+    
+    public void SetCurrentSubscription(SubscriptionResource subscription)
     {
-        var subscription = await GetCurrentSubscriptionAsync();
-        return subscription.Data.SubscriptionId;
+        _currentSubscription = subscription;
     }
 
-    public async Task<string> GetCurrentSubscriptionNameAsync()
+    public async Task<string?> GetCurrentSubscriptionIdAsync()
     {
         var subscription = await GetCurrentSubscriptionAsync();
-        return subscription.Data.DisplayName;
+        return subscription?.Data.SubscriptionId;
+    }
+
+    public async Task<string?> GetCurrentSubscriptionNameAsync()
+    {
+        var subscription = await GetCurrentSubscriptionAsync();
+        return subscription?.Data.DisplayName;
     }
     
     public async Task<List<SubscriptionResource>> GetAllSubscriptionsAsync()
